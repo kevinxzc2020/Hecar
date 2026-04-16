@@ -1,0 +1,73 @@
+import { Expense, Vehicle } from "../types";
+
+export const mockVehicle: Vehicle = {
+  id: "v-1",
+  nickname: "My Car",
+  brand: "Toyota",
+  model: "Camry",
+  year: 2023,
+  fuelType: "gas",
+};
+
+export const mockExpenses: Expense[] = [
+  {
+    id: "e-1",
+    vehicleId: "v-1",
+    type: "gas",
+    amount: 62.5,
+    liters: 45,
+    stationName: "Chevron Market St",
+    date: "2026-04-15T10:30:00Z",
+    odometer: 15230,
+  },
+  {
+    id: "e-2",
+    vehicleId: "v-1",
+    type: "gas",
+    amount: 55.8,
+    liters: 40,
+    stationName: "Costco Gas South SF",
+    date: "2026-04-10T14:20:00Z",
+    odometer: 14980,
+  },
+  {
+    id: "e-3",
+    vehicleId: "v-1",
+    type: "gas",
+    amount: 48.3,
+    liters: 35,
+    stationName: "Arco Mission St",
+    date: "2026-04-03T09:15:00Z",
+    odometer: 14700,
+  },
+  {
+    id: "e-4",
+    vehicleId: "v-1",
+    type: "gas",
+    amount: 70.1,
+    liters: 50,
+    stationName: "Shell Van Ness",
+    date: "2026-03-28T16:45:00Z",
+    odometer: 14450,
+  },
+  {
+    id: "e-5",
+    vehicleId: "v-1",
+    type: "gas",
+    amount: 58.9,
+    liters: 42,
+    stationName: "76 Geary Blvd",
+    date: "2026-03-20T11:00:00Z",
+    odometer: 14100,
+  },
+  {
+    id: "e-6",
+    vehicleId: "v-1",
+    type: "gas",
+    amount: 45.2,
+    liters: 32,
+    stationName: "Costco Gas South SF",
+    date: "2026-03-14T08:30:00Z",
+    odometer: 13850,
+  },
+];
