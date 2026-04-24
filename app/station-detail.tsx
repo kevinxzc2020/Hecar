@@ -14,17 +14,21 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { colors, spacing, radius, fontSize } from "../src/theme";
 import { useApp } from "../src/context/AppContext";
 import { mockGasStations, mockEVStations } from "../src/data/mockStations";
-import { GasStation, EVStation, FuelMode } from "../src/types";
+import { getStationById } from "../src/services/stationsApi";
+import { GasStation, EVStation, FuelMode, isGasStation } from "../src/types";
 
 export default function StationDetailScreen() {
   const { id, mode } = useLocalSearchParams<{ id: string; mode: FuelMode }>();
   const { state, dispatch } = useApp();
   const router = useRouter();
 
-  const isGas = mode === "gas";
-  const station = isGas
-    ? mockGasStations.find((s) => s.id === id)
-    : mockEVStations.find((s) => s.id === id);
+  // 优先从 API 缓存里找（id 形如 osm-gas-* / ocm-ev-*）；找不到再退到 mock 数据
+  const cached = id ? getStationById(id) : null;
+  const fallback = (mode === "gas" ? mockGasStations : mockEVStations).find(
+    (s) => s.id === id,
+  );
+  const station = cached ?? fallback;
+  const isGas = station ? isGasStation(station) : mode === "gas";
 
   if (!station) {
     return (
@@ -37,9 +41,12 @@ export default function StationDetailScreen() {
   const isFav = state.favoriteStationIds.includes(station.id);
 
   const openNav = () => {
+    // Web 上 Platform.select 没对应 key 会返回 undefined，补一个 Google Maps 网页版
     const url = Platform.select({
       ios: `maps:?daddr=${station.latitude},${station.longitude}`,
       android: `google.navigation:q=${station.latitude},${station.longitude}`,
+      web: `https://www.google.com/maps/dir/?api=1&destination=${station.latitude},${station.longitude}`,
+      default: `https://www.google.com/maps/dir/?api=1&destination=${station.latitude},${station.longitude}`,
     });
     if (url) Linking.openURL(url);
   };
@@ -98,15 +105,27 @@ export default function StationDetailScreen() {
           {/* Prices */}
           <Text style={styles.sectionTitle}>油价</Text>
           <View style={styles.priceGrid}>
-            {Object.entries(gs.prices).map(([type, price]) => (
-              <View key={type} style={styles.priceCard}>
-                <Text style={styles.priceType}>
-                  {type === "regular" ? "Regular" : type === "midgrade" ? "Mid" : type === "premium" ? "Premium" : "Diesel"}
-                </Text>
-                <Text style={styles.priceAmount}>${price?.toFixed(2)}</Text>
-                <Text style={styles.priceUnit}>/gal</Text>
-              </View>
-            ))}
+            {Object.entries(gs.prices)
+              // 过滤掉 undefined / 非数字的价格条目，避免渲染 "$undefined"
+              .filter(
+                (entry): entry is [string, number] =>
+                  typeof entry[1] === "number" && Number.isFinite(entry[1]),
+              )
+              .map(([type, price]) => (
+                <View key={type} style={styles.priceCard}>
+                  <Text style={styles.priceType}>
+                    {type === "regular"
+                      ? "Regular"
+                      : type === "midgrade"
+                      ? "Mid"
+                      : type === "premium"
+                      ? "Premium"
+                      : "Diesel"}
+                  </Text>
+                  <Text style={styles.priceAmount}>${price.toFixed(2)}</Text>
+                  <Text style={styles.priceUnit}>/gal</Text>
+                </View>
+              ))}
           </View>
 
           {/* Navigate button */}

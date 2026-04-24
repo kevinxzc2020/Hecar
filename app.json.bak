@@ -38,6 +38,12 @@
             "backgroundColor": "#000000"
           }
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Hecar needs your location to show nearby gas stations and EV chargers."
+        }
       ]
     ],
     "experiments": {

@@ -1,4 +1,12 @@
-import React, { createContext, useContext, useReducer, ReactNode } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useReducer,
+  useRef,
+  ReactNode,
+} from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   AppState,
   Vehicle,
@@ -7,6 +15,10 @@ import {
   UserProfile,
 } from "../types";
 import { mockVehicle, mockExpenses } from "../data/mockExpenses";
+
+// ---- Storage ----
+
+const STORAGE_KEY = "@hecar/appState/v1";
 
 // ---- Actions ----
 
@@ -18,9 +30,12 @@ type Action =
   | { type: "REMOVE_VEHICLE"; payload: string }
   | { type: "SET_ACTIVE_VEHICLE"; payload: string }
   | { type: "ADD_EXPENSE"; payload: Expense }
-  | { type: "TOGGLE_FAVORITE"; payload: string };
+  | { type: "TOGGLE_FAVORITE"; payload: string }
+  | { type: "HYDRATE"; payload: AppState }
+  | { type: "LOGOUT" }
+  | { type: "RESET" };
 
-// ---- Initial State ----
+// ---- Initial / Demo State ----
 
 const initialState: AppState = {
   isOnboarded: false,
@@ -29,10 +44,9 @@ const initialState: AppState = {
   activeVehicleId: null,
   fuelMode: "gas",
   expenses: [],
-  favoriteStationIds: ["gas-2", "gas-4", "ev-1"],
+  favoriteStationIds: [],
 };
 
-// Demo state for skipping onboarding during development
 export const demoState: AppState = {
   isOnboarded: true,
   user: {
@@ -52,6 +66,12 @@ export const demoState: AppState = {
 
 function appReducer(state: AppState, action: Action): AppState {
   switch (action.type) {
+    case "HYDRATE":
+      return action.payload;
+    case "LOGOUT":
+      return { ...state, user: null, isOnboarded: false };
+    case "RESET":
+      return initialState;
     case "SET_ONBOARDED":
       return { ...state, isOnboarded: action.payload };
     case "SET_USER":
@@ -89,20 +109,101 @@ function appReducer(state: AppState, action: Action): AppState {
   }
 }
 
+// ---- Hydration Helpers ----
+
+function isValidAppState(v: unknown): v is AppState {
+  if (!v || typeof v !== "object") return false;
+  const s = v as Record<string, unknown>;
+  return (
+    typeof s.isOnboarded === "boolean" &&
+    Array.isArray(s.vehicles) &&
+    Array.isArray(s.expenses) &&
+    Array.isArray(s.favoriteStationIds) &&
+    (s.fuelMode === "gas" || s.fuelMode === "ev") &&
+    (s.user === null || typeof s.user === "object") &&
+    (s.activeVehicleId === null || typeof s.activeVehicleId === "string")
+  );
+}
+
+async function loadPersistedState(): Promise<AppState | null> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!isValidAppState(parsed)) {
+      await AsyncStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function persistState(state: AppState): Promise<void> {
+  try {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // ignore; next state change will try again
+  }
+}
+
+async function clearPersistedState(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 // ---- Context ----
 
 interface AppContextValue {
   state: AppState;
   dispatch: React.Dispatch<Action>;
+  resetLocalData: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  // Use demoState for now so the app skips onboarding and has data
-  const [state, dispatch] = useReducer(appReducer, demoState);
+  const [state, dispatch] = useReducer(appReducer, initialState);
+  const hydratedRef = useRef(false);
+  const [hydrated, setHydrated] = React.useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const persisted = await loadPersistedState();
+      if (cancelled) return;
+
+      if (persisted) {
+        dispatch({ type: "HYDRATE", payload: persisted });
+      } else if (__DEV__) {
+        dispatch({ type: "HYDRATE", payload: demoState });
+      }
+      hydratedRef.current = true;
+      setHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    void persistState(state);
+  }, [state]);
+
+  const resetLocalData = React.useCallback(async () => {
+    await clearPersistedState();
+    dispatch({ type: "RESET" });
+  }, []);
+
+  if (!hydrated) return null;
+
   return (
-    <AppContext.Provider value={{ state, dispatch }}>
+    <AppContext.Provider value={{ state, dispatch, resetLocalData }}>
       {children}
     </AppContext.Provider>
   );

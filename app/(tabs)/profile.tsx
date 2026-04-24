@@ -14,7 +14,7 @@ import { colors, spacing, radius, fontSize } from "../../src/theme";
 import { useApp } from "../../src/context/AppContext";
 
 export default function ProfileScreen() {
-  const { state, dispatch } = useApp();
+  const { state, dispatch, resetLocalData } = useApp();
   const router = useRouter();
 
   const user = state.user;
@@ -33,13 +33,47 @@ export default function ProfileScreen() {
       ? colors.primary
       : colors.textSecondary;
 
-  const menuItems: {
+  const handleLogout = () => {
+    Alert.alert("退出登录", "确定退出？车辆和消费记录会保留。", [
+      { text: "取消", style: "cancel" },
+      {
+        text: "退出",
+        style: "destructive",
+        onPress: () => {
+          dispatch({ type: "LOGOUT" });
+          router.replace("/(onboarding)/login" as any);
+        },
+      },
+    ]);
+  };
+
+  const handleResetLocalData = () => {
+    Alert.alert(
+      "重置本地数据",
+      "会清空所有车辆、消费记录、收藏和登录状态。此操作不可撤销。",
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: "重置",
+          style: "destructive",
+          onPress: async () => {
+            await resetLocalData();
+            router.replace("/(onboarding)/login" as any);
+          },
+        },
+      ],
+    );
+  };
+
+  type MenuItem = {
     icon: keyof typeof Ionicons.glyphMap;
     label: string;
     onPress: () => void;
     color?: string;
     badge?: string;
-  }[] = [
+  };
+
+  const menuItems: MenuItem[] = [
     {
       icon: "car-sport",
       label: "我的车辆",
@@ -74,6 +108,16 @@ export default function ProfileScreen() {
       onPress: () => Alert.alert("Hecar", "Version 1.0.0"),
     },
   ];
+
+  // 仅开发环境下显示一个调试入口，便于反复测持久化
+  if (__DEV__) {
+    menuItems.push({
+      icon: "refresh-circle",
+      label: "重置本地数据 (DEV)",
+      onPress: handleResetLocalData,
+      color: colors.danger,
+    });
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -171,10 +215,8 @@ export default function ProfileScreen() {
         {/* Logout */}
         <TouchableOpacity
           style={styles.logoutBtn}
-          onPress={() => Alert.alert("退出登录", "确定退出？", [
-            { text: "取消" },
-            { text: "退出", style: "destructive" },
-          ])}
+          onPress={handleLogout}
+          activeOpacity={0.7}
         >
           <Ionicons name="log-out-outline" size={18} color={colors.danger} />
           <Text style={styles.logoutText}>退出登录</Text>

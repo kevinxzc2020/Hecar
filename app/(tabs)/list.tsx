@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   StyleSheet,
   Text,
@@ -13,88 +13,163 @@ import { colors, spacing, radius, fontSize } from "../../src/theme";
 import { useApp } from "../../src/context/AppContext";
 import { mockGasStations, mockEVStations } from "../../src/data/mockStations";
 import { Station, GasStation, EVStation, isGasStation } from "../../src/types";
+import { useUserLocation } from "../../src/hooks/useUserLocation";
+import { useNearbyStations } from "../../src/hooks/useNearbyStations";
+import { haversineKm, formatDistanceKm } from "../../src/utils/distance";
 
 type SortBy = "price" | "distance" | "rating";
+
+/** 站点 + 真实距离（无定位时取 mock 里的 distance） */
+type StationWithDist = {
+  station: Station;
+  /** 公里数；来自定位算出的 Haversine 距离或 mock fallback */
+  km: number;
+  /** 这个距离是真实算出来的还是 mock fallback */
+  real: boolean;
+};
 
 export default function ListScreen() {
   const { state } = useApp();
   const router = useRouter();
+  // 实时订阅位置流：边走边更新每个站点的距离
+  const { coord: userCoord } = useUserLocation({ watch: true });
   const [sortBy, setSortBy] = useState<SortBy>("price");
 
   const isGas = state.fuelMode === "gas";
-  const raw: Station[] = isGas ? mockGasStations : mockEVStations;
 
-  const sorted = [...raw].sort((a, b) => {
-    if (sortBy === "distance") return a.distance - b.distance;
-    if (sortBy === "rating") return b.rating - a.rating;
-    // price
-    if (isGasStation(a) && isGasStation(b)) {
-      return (a.prices.regular ?? 99) - (b.prices.regular ?? 99);
-    }
-    if (!isGasStation(a) && !isGasStation(b)) {
-      const aMin = Math.min(...(a as EVStation).chargers.map((c) => c.pricePerKwh));
-      const bMin = Math.min(...(b as EVStation).chargers.map((c) => c.pricePerKwh));
-      return aMin - bMin;
-    }
-    return 0;
-  });
+  // 真实站点优先；无定位/API 失败/返回空 → 降级到 mock
+  const {
+    stations: nearby,
+    loading: stationsLoading,
+    error: stationsError,
+  } = useNearbyStations(userCoord, state.fuelMode);
+  const usingFallback = nearby.length === 0;
+
+  // 给每个站点打上距离标签（真实 or mock），useMemo 避免每帧重算
+  const withDistance: StationWithDist[] = useMemo(() => {
+    const raw: Station[] =
+      nearby.length > 0 ? nearby : isGas ? mockGasStations : mockEVStations;
+    return raw.map((s) => {
+      if (userCoord) {
+        return {
+          station: s,
+          km: haversineKm(userCoord, {
+            latitude: s.latitude,
+            longitude: s.longitude,
+          }),
+          real: true,
+        };
+      }
+      return { station: s, km: s.distance, real: false };
+    });
+  }, [isGas, userCoord, nearby]);
+
+  // 排序：价格 / 距离 / 评分
+  const sorted = useMemo(() => {
+    const copy = [...withDistance];
+    copy.sort((a, b) => {
+      if (sortBy === "distance") return a.km - b.km;
+      if (sortBy === "rating") return b.station.rating - a.station.rating;
+      // price
+      if (isGasStation(a.station) && isGasStation(b.station)) {
+        return (
+          (a.station.prices.regular ?? 99) -
+          (b.station.prices.regular ?? 99)
+        );
+      }
+      if (!isGasStation(a.station) && !isGasStation(b.station)) {
+        const aMin = Math.min(
+          ...(a.station as EVStation).chargers.map((c) => c.pricePerKwh),
+        );
+        const bMin = Math.min(
+          ...(b.station as EVStation).chargers.map((c) => c.pricePerKwh),
+        );
+        return aMin - bMin;
+      }
+      return 0;
+    });
+    return copy;
+  }, [withDistance, sortBy]);
 
   const handlePress = (station: Station) => {
     router.push(
-      `/station-detail?id=${station.id}&mode=${state.fuelMode}` as any
+      `/station-detail?id=${station.id}&mode=${state.fuelMode}` as any,
     );
   };
 
-  const renderGasItem = ({ item }: { item: GasStation }) => (
-    <TouchableOpacity
-      style={styles.row}
-      onPress={() => handlePress(item)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.rowLeft}>
-        <View style={[styles.iconCircle, { backgroundColor: colors.gas + "20" }]}>
-          <Ionicons name="flame" size={20} color={colors.gas} />
-        </View>
-        <View style={styles.rowInfo}>
-          <Text style={styles.rowName} numberOfLines={1}>{item.name}</Text>
-          <Text style={styles.rowAddr} numberOfLines={1}>{item.address}</Text>
-        </View>
-      </View>
-      <View style={styles.rowRight}>
-        <Text style={styles.rowPrice}>
-          ${item.prices.regular?.toFixed(2) ?? "—"}
-        </Text>
-        <Text style={styles.rowMeta}>{item.distance} km</Text>
-      </View>
-    </TouchableOpacity>
-  );
-
-  const renderEVItem = ({ item }: { item: EVStation }) => {
-    const avail = item.chargers.filter((c) => c.status === "available").length;
-    const cheapest = Math.min(...item.chargers.map((c) => c.pricePerKwh));
+  const renderGasItem = ({ item }: { item: StationWithDist }) => {
+    const gs = item.station as GasStation;
     return (
       <TouchableOpacity
         style={styles.row}
-        onPress={() => handlePress(item)}
+        onPress={() => handlePress(gs)}
         activeOpacity={0.7}
       >
         <View style={styles.rowLeft}>
-          <View style={[styles.iconCircle, { backgroundColor: colors.ev + "20" }]}>
+          <View
+            style={[styles.iconCircle, { backgroundColor: colors.gas + "20" }]}
+          >
+            <Ionicons name="flame" size={20} color={colors.gas} />
+          </View>
+          <View style={styles.rowInfo}>
+            <Text style={styles.rowName} numberOfLines={1}>
+              {gs.name}
+            </Text>
+            <Text style={styles.rowAddr} numberOfLines={1}>
+              {gs.address}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.rowRight}>
+          <Text style={styles.rowPrice}>
+            ${gs.prices.regular?.toFixed(2) ?? "—"}
+          </Text>
+          <Text style={styles.rowMeta}>
+            {formatDistanceKm(item.km)}
+            {!item.real && "*"}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderEVItem = ({ item }: { item: StationWithDist }) => {
+    const ev = item.station as EVStation;
+    const avail = ev.chargers.filter((c) => c.status === "available").length;
+    const cheapest =
+      ev.chargers.length > 0
+        ? Math.min(...ev.chargers.map((c) => c.pricePerKwh))
+        : null;
+    return (
+      <TouchableOpacity
+        style={styles.row}
+        onPress={() => handlePress(ev)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.rowLeft}>
+          <View
+            style={[styles.iconCircle, { backgroundColor: colors.ev + "20" }]}
+          >
             <Ionicons name="flash" size={20} color={colors.ev} />
           </View>
           <View style={styles.rowInfo}>
-            <Text style={styles.rowName} numberOfLines={1}>{item.name}</Text>
+            <Text style={styles.rowName} numberOfLines={1}>
+              {ev.name}
+            </Text>
             <View style={styles.rowSubRow}>
-              <Text style={styles.rowAddr}>{item.network}</Text>
+              <Text style={styles.rowAddr}>{ev.network}</Text>
               <View style={styles.availDot}>
                 <View
                   style={[
                     styles.dotSmall,
-                    { backgroundColor: avail > 0 ? colors.available : colors.danger },
+                    {
+                      backgroundColor:
+                        avail > 0 ? colors.available : colors.danger,
+                    },
                   ]}
                 />
                 <Text style={styles.rowAddr}>
-                  {avail}/{item.chargers.length}
+                  {avail}/{ev.chargers.length}
                 </Text>
               </View>
             </View>
@@ -102,9 +177,12 @@ export default function ListScreen() {
         </View>
         <View style={styles.rowRight}>
           <Text style={[styles.rowPrice, { color: colors.ev }]}>
-            ${cheapest.toFixed(2)}
+            {cheapest != null ? `$${cheapest.toFixed(2)}` : "—"}
           </Text>
-          <Text style={styles.rowMeta}>{item.distance} km</Text>
+          <Text style={styles.rowMeta}>
+            {formatDistanceKm(item.km)}
+            {!item.real && "*"}
+          </Text>
         </View>
       </TouchableOpacity>
     );
@@ -135,19 +213,35 @@ export default function ListScreen() {
             size={14}
             color={isGas ? colors.gas : colors.ev}
           />
-          <Text style={[styles.sortText, { color: isGas ? colors.gas : colors.ev }]}>
+          <Text
+            style={[
+              styles.sortText,
+              { color: isGas ? colors.gas : colors.ev },
+            ]}
+          >
             {isGas ? "Gas" : "EV"}
           </Text>
         </View>
       </View>
 
+      {/* 加载 / 降级 / 无定位 的提示链 */}
+      {stationsLoading && (
+        <Text style={styles.hint}>正在加载附近站点…</Text>
+      )}
+      {!stationsLoading && userCoord && usingFallback && (
+        <Text style={styles.hint}>
+          {stationsError ? `拉取失败（${stationsError}），` : "附近没找到，"}
+          显示示例数据
+        </Text>
+      )}
+      {!userCoord && (
+        <Text style={styles.hint}>* 距离为估算值（未授权定位）</Text>
+      )}
+
       <FlatList
         data={sorted}
-        keyExtractor={(item) => item.id}
-        renderItem={isGas
-          ? (props) => renderGasItem(props as any)
-          : (props) => renderEVItem(props as any)
-        }
+        keyExtractor={(item) => item.station.id}
+        renderItem={isGas ? renderGasItem : renderEVItem}
         contentContainerStyle={styles.listContent}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
       />
@@ -171,7 +265,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgCard,
   },
   sortBtnActive: { backgroundColor: colors.primary },
-  sortText: { color: colors.textSecondary, fontSize: fontSize.sm, fontWeight: "600" },
+  sortText: {
+    color: colors.textSecondary,
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+  },
   sortTextActive: { color: "#fff" },
   miniToggle: {
     flexDirection: "row",
@@ -182,6 +280,12 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: radius.full,
     backgroundColor: colors.bgCard,
+  },
+  hint: {
+    color: colors.textMuted,
+    fontSize: fontSize.xs,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
   },
   listContent: { paddingBottom: 20 },
   row: {

@@ -28,14 +28,16 @@ export default function ReportScreen() {
     return d.getMonth() === prev.getMonth() && d.getFullYear() === prev.getFullYear();
   });
 
-  const thisTotal = thisMonth.reduce((s, e) => s + e.amount, 0);
-  const lastTotal = lastMonth.reduce((s, e) => s + e.amount, 0);
-  const allTotal = expenses.reduce((s, e) => s + e.amount, 0);
+  // 求和前过掉 NaN / Infinity，防止 AsyncStorage 里残留脏数据污染整张报告
+  const safeAmount = (n: number) => (Number.isFinite(n) ? n : 0);
+  const thisTotal = thisMonth.reduce((s, e) => s + safeAmount(e.amount), 0);
+  const lastTotal = lastMonth.reduce((s, e) => s + safeAmount(e.amount), 0);
+  const allTotal = expenses.reduce((s, e) => s + safeAmount(e.amount), 0);
   const avgPerFill = expenses.length > 0 ? allTotal / expenses.length : 0;
 
   // Simple bar chart data — last 6 fills
   const recent = expenses.slice(0, 6).reverse();
-  const maxAmount = Math.max(...recent.map((e) => e.amount), 1);
+  const maxAmount = Math.max(...recent.map((e) => safeAmount(e.amount)), 1);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -45,12 +47,12 @@ export default function ReportScreen() {
           <View style={styles.summaryCard}>
             <Text style={styles.summaryLabel}>本月花费</Text>
             <Text style={styles.summaryValue}>${thisTotal.toFixed(2)}</Text>
-            <Text style={styles.summaryMeta}>{thisMonth.length} 次加油</Text>
+            <Text style={styles.summaryMeta}>{thisMonth.length} 笔消费</Text>
           </View>
           <View style={styles.summaryCard}>
             <Text style={styles.summaryLabel}>上月花费</Text>
             <Text style={styles.summaryValue}>${lastTotal.toFixed(2)}</Text>
-            <Text style={styles.summaryMeta}>{lastMonth.length} 次加油</Text>
+            <Text style={styles.summaryMeta}>{lastMonth.length} 笔消费</Text>
           </View>
         </View>
 
@@ -73,11 +75,12 @@ export default function ReportScreen() {
           <Text style={styles.sectionTitle}>最近消费</Text>
           <View style={styles.chartContainer}>
             {recent.map((e) => {
-              const h = (e.amount / maxAmount) * 120;
+              const amt = safeAmount(e.amount);
+              const h = (amt / maxAmount) * 120;
               const d = new Date(e.date);
               return (
                 <View key={e.id} style={styles.barGroup}>
-                  <Text style={styles.barValue}>${e.amount.toFixed(0)}</Text>
+                  <Text style={styles.barValue}>${amt.toFixed(0)}</Text>
                   <View
                     style={[
                       styles.bar,
@@ -127,7 +130,7 @@ export default function ReportScreen() {
                   </Text>
                 </View>
                 <View style={styles.txRight}>
-                  <Text style={styles.txAmount}>-${e.amount.toFixed(2)}</Text>
+                  <Text style={styles.txAmount}>-${safeAmount(e.amount).toFixed(2)}</Text>
                   {e.liters != null && (
                     <Text style={styles.txMeta}>{e.liters}L</Text>
                   )}

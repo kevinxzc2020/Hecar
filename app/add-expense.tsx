@@ -29,20 +29,53 @@ export default function AddExpenseScreen() {
   const [odometer, setOdometer] = useState("");
 
   const handleSave = () => {
-    if (!amount || !stationName) {
-      Alert.alert("请填写", "金额和站点名称不能为空");
+    // 必须有当前车辆，否则 expense 挂不上
+    if (!state.activeVehicleId) {
+      Alert.alert(
+        "还没有车辆",
+        "请先添加一辆车再记录消费",
+        [
+          { text: "取消", style: "cancel" },
+          {
+            text: "去添加",
+            onPress: () => router.replace("/add-vehicle" as any),
+          },
+        ],
+      );
       return;
     }
+
+    if (!stationName.trim()) {
+      Alert.alert("请填写", "站点名称不能为空");
+      return;
+    }
+
+    // 金额校验：必须是正有限数
+    const amountNum = parseFloat(amount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      Alert.alert("金额无效", "请输入大于 0 的金额");
+      return;
+    }
+
+    // 可选数值字段：存在时必须有效，无效就视作未填
+    const litersNum = liters ? parseFloat(liters) : NaN;
+    const kwhNum = kwh ? parseFloat(kwh) : NaN;
+    const odometerNum = odometer ? parseInt(odometer, 10) : NaN;
+
     const expense: Expense = {
       id: `e-${Date.now()}`,
-      vehicleId: state.activeVehicleId ?? "v-1",
+      vehicleId: state.activeVehicleId,
       type: expenseType,
-      amount: parseFloat(amount),
-      liters: liters ? parseFloat(liters) : undefined,
-      kwh: kwh ? parseFloat(kwh) : undefined,
-      stationName,
+      amount: amountNum,
+      liters:
+        Number.isFinite(litersNum) && litersNum > 0 ? litersNum : undefined,
+      kwh: Number.isFinite(kwhNum) && kwhNum > 0 ? kwhNum : undefined,
+      stationName: stationName.trim(),
       date: new Date().toISOString(),
-      odometer: odometer ? parseInt(odometer, 10) : undefined,
+      odometer:
+        Number.isFinite(odometerNum) && odometerNum > 0
+          ? odometerNum
+          : undefined,
     };
     dispatch({ type: "ADD_EXPENSE", payload: expense });
     router.back();
